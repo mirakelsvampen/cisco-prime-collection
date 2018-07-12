@@ -19,26 +19,26 @@ import argparse
 import itertools
 import urllib.request as request
 
+from pprint import pprint
 from urllib.error import HTTPError
 
 try: #   Non Python included libraries
     import paramiko
     import win32clipboard
-
-    from paramiko_expect import SSHClientInteraction
+    from netmiko import BaseConnection
 except ImportError:
     import subprocess # provides headless interaction for pip installations, which is only needed if the required packages are missing from the client PC
     print(chr(27) + "[2J")  # Clear the screen
     print('Missing some required packages. No worries!\nPerforming a dependency check...')
     
-    requirements = ['paramiko', 'pywin32']
+    requirements = ['paramiko', 'pywin32', 'netmiko']
     installed_modules = subprocess.Popen(
             ['pip', 'list', 'installed'],
             stderr=subprocess.PIPE,
             stdout=subprocess.PIPE,
         ).communicate()[0]
 
-    dependencies = re.findall(r'(paramiko[-expect]*|pywin32)', installed_modules.decode())
+    dependencies = re.findall(r'(paramiko[-expect]*|pywin32|netmiko)', installed_modules.decode())
 
     for package in requirements:
         if package in dependencies: # if the package is allready installed 
@@ -59,12 +59,13 @@ class Reinv(): # Class for modular use
         """
         ssl_context = ssl.create_default_context()
         ssl_context.check_hostname = False
-        ssl_context.verify_mode = ssl.CERT_NONE # ignore cert (because of the self-signed certs aspect) REMOVE THIS LINE OTHERWISE
+        ssl_context.verify_mode = ssl.CERT_NONE
 
         try: 
             """
                 Format credentials to fit with Primes Basic Auth
-                https://<ip/path to prime server>/webacs/api/v1/?id=authentication-doc
+                https://<ip to prime>/webacs/api/v1/?id=authentication-doc
+
             """
             #   Authentication
             req = request.Request(URL)
@@ -107,38 +108,37 @@ class Reinv(): # Class for modular use
             return False
 
     def switch(self, hostname, username, password):
-        #   Make sure to verify the found mac addresses with the correct interface range
+        #   Find all mac addresses and the associated ports
         mac_reg = re.compile(r'([a-z0-9]{4}\.[a-z0-9]{4}\.[a-z0-9]{4})\s+STATIC\s+(Gi\d+/\d+/\d+)')
-        try:
-            ssh = paramiko.SSHClient() 
-            # Locate known_hosts
-            # Set SSH key parameters to auto accept unknown hosts
-            ssh.load_system_host_keys()
-            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        #   Switch connection options:
+        switch_details = {
+            'device_type':'cisco_ios',
+            'host':hostname,
+            'username':username,
+            'password':password,
+        }
 
-            ssh.connect(hostname=hostname, username=username, password=password)
-            connection = ssh.invoke_shell()
-            connection.send('sh mac address-table | inc STATIC      Gi\n \n') # send a fancy enter + space
-            time.sleep(1)
-            connection.send('exit\n') # close the ssh connection
-            mac_table = connection.recv(10000).decode()
-            ports = re.findall(mac_reg, mac_table) # retrieve all ports with static MAC addresses
-            ports = [list(x) for x in ports] # covert the tuples from re.findall to lists
-            #   Now the interfaces must be sorted in numberical order
-            #   Perform buble sorting
-            n = len(ports)
-            # Traverse through all array elements
-            for i in range(n):
-                for j in range(0, n-i-1):
-                    # traverse the array from 0 to n-i-1
-                    # Swap if the element found is greater
-                    # than the next element
-                    if int(ports[j][1][6:]) > int(ports[j+1][1][6:]): # Take the port number from port string (e.g. G1/0/22 = 22)
-                        # ye olde switcharoo
-                        ports[j][0], ports[j+1][0] = ports[j+1][0], ports[j][0] # switch mac addresses
-                        ports[j][1], ports[j+1][1] = ports[j+1][1], ports[j][1] # switch interfaces
-            return ports
-
+        connection = BaseConnection(**switch_details)
+        connection.write_channel('sh mac address-table | inc STATIC      Gi\n')
+        time.sleep(1) # a short break to offload the connection
+        out = connection.read_channel()
+        ports = re.findall(mac_reg, out) # retrieve all ports with static MAC addresses
+        connection.disconnect()
+        ports = [list(x) for x in ports] # covert the tuples from re.findall to lists
+        #   Now the interfaces must be sorted in numberical order
+        #   Perform buble sorting
+        n = len(ports)
+        # Traverse through all array elements
+        for i in range(n):
+            for j in range(0, n-i-1):
+                # traverse the array from 0 to n-i-1
+                # Swap if the element found is greater
+                # than the next element
+                if int(ports[j][1][6:]) > int(ports[j+1][1][6:]): # Take the port number from port string (e.g. G1/0/22 = 22)
+                    # ye olde switcharoo
+                    ports[j][0], ports[j+1][0] = ports[j+1][0], ports[j][0] # switch mac addresses
+                    ports[j][1], ports[j+1][1] = ports[j+1][1], ports[j][1] # switch interfaces
+        return ports
 
     def port_range(self, port_ranges):
         """
@@ -170,22 +170,18 @@ class Reinv(): # Class for modular use
 
 if __name__ == '__main__': # Start the script here.
     """
-        Utilizes the Class Reinv
+        Utilizes the Class Reinv in a modular approach. 
         For ease of use the code below is is written inside the same python file as 
         the reinvestering module itself. But the code below is only utilized if 
         this file is directy interpreted/executed. If the Reinv class is called 
         from another source file then the code below is ignored.
+
         The following code does the following:
         1. Get old Mac addresses from prime
         2. Get Ethernet mac adresses from switch
         3. Translate ethernet mac addresses to baseRadioMac addresses by asking prime
         4. format data and write to csv file
-        The script read the host clipboard, which in turn must contain a list of access point hostnames.
-        By copying a bunch of hostnames which are formated in list order:
-        gothenburg-ap01
-        gothenburg-ap02
-        gothenburg-ap03
-        gothenburg-ap04
+
         the data is written to the csv file in the following manner:
             hostName,oldBaseRadioMac,hostName,newBaseRadioMac
         
@@ -202,14 +198,13 @@ if __name__ == '__main__': # Start the script here.
     parser.add_argument("TACACSUsername", help="Username for TACACS, e.g. karl3")
     parser.add_argument("TACACSPassword", help=" Password for TACACS, e.g. alfred4")
     parser.add_argument("Switch", help="switchHostname/IP, can be DN/FQDN or IP")
-    parser.add_argument("PortRange", help="Port range given in numbers separated with a hyphen (several ranges are seperated with use of a comma) e.g. 1-25,28-32 ]")
+    parser.add_argument("PortRange", help="Port range given in numbers separated with a hyphen (several ranges are seperated with use of a comma) e.g. 1-25,28-32")
     args = parser.parse_args()
     prime_usr = args.Username
     prime_pwd = args.Password
     tacacs_usr = args.TACACSUsername
     tacacs_pwd = args.TACACSPassword
     switch_name = args.Switch
-    if not switch_name.lower() in 
     port_ranges=get.port_range(args.PortRange)
     print('\n')
 
@@ -247,7 +242,7 @@ if __name__ == '__main__': # Start the script here.
     print('HOSTNAME     |       baseRadioMac')
     for a in ap:
         time.sleep(0.3) # Reduce stress upon Cisco Prime (Fast queries seem to introduce HTTP error 503)
-        prime_url = 'https://<ip/path to prime server>/webacs/api/v3/data/RadioDetails.json?.full=true&apName=startsWith({})'.format(a)
+        prime_url = 'https://<ip to prime>/webacs/api/v3/data/RadioDetails.json?.full=true&apName=startsWith({})'.format(a)
         result = get.prime(prime_usr, prime_pwd, prime_url, a)  
         if result == False:
             sys.exit()
@@ -258,7 +253,6 @@ if __name__ == '__main__': # Start the script here.
     new_ap_ethernet = get.switch(switch_name, tacacs_usr, tacacs_pwd)
     print('\nGathering baseRadioMac addresses for new Access Points connected to switch {}...'.format(switch_name))
     print('HOSTNAME     |       baseRadioMac')
-
     if new_ap_ethernet == []:
         print(chr(27) + "[2J")
         print('No AP connected to switch...')
@@ -269,10 +263,10 @@ if __name__ == '__main__': # Start the script here.
             time.sleep(0.3) # Reduce stress upon Cisco Prime (Fast queries seem to introduce HTTP error 503)
             ethernet, interface = port # e.g. FF:FF:FF:00:11:22, Gi1/0/22
             if interface in port_ranges:
-            #   format "00ff.ff00.ffff" into "00:ff:ff:00:ff:ff"
+            #   format "7079.b3fd.0960" into "70:79:b3:fd:09:60"
                 ethernet = ''.join(ethernet.split('.'))
                 ethernet = ':'.join([ethernet[i:i+2] for i in range(0, len(ethernet), 2)])
-                prime_url = 'https://<ip/path to prime server>/webacs/api/v3/data/RadioDetails.json?.full=true&ethernetMac=startsWith(%22{}%22)'.format(ethernet)
+                prime_url = 'https:<ip to prime>webacs/api/v3/data/RadioDetails.json?.full=true&ethernetMac=startsWith(%22{}%22)'.format(ethernet)
                 result = get.prime(prime_usr, prime_pwd, prime_url, a='placehoder') # since the "a" argument is required by the called function, we'll pass a placeholer here
                 if result == False:
                     sys.exit()
@@ -281,6 +275,10 @@ if __name__ == '__main__': # Start the script here.
                     new_ap[result[0][1]] = interface
             else:
                 pass # ignore interface if it is not found in the list of specified physical ports
+            
+            if new_ap == {}: #  if Empty, then no AP where found on any switchports
+                print('No AP found on any of the given switchports.')
+                sys.exit()
 
     except TypeError:
         print(chr(27) + "[2J")  # Clear the screen
@@ -301,4 +299,5 @@ if __name__ == '__main__': # Start the script here.
     for files in os.listdir():
         if files == '{}.csv'.format(sitename):
             path = os.path.abspath('{}.csv'.format(sitename))
-print('{}.csv is found at location: {}'.format(sitename, path))
+            print('{}.csv is found at location: {}'.format(sitename, path))
+
