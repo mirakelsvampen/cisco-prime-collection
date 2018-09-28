@@ -17,9 +17,9 @@ HostName,OldBaseRadioAddress,Hostname,NewBaseRadioAddress
 
 **Requirements:**
 
-All involved accesspoints must be seen in Prime
-python version3
-python modules: netmiko, urllib.request, win32clipboard, argparse
+All involved accesspoints must be seen in Prime.
+Python version 3.x.
+python modules: __netmiko, urllib.request, win32clipboard, argparse__
 
 
 **Troubleshooting**
