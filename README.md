@@ -26,7 +26,7 @@ python modules: __netmiko, urllib.request, win32clipboard, argparse__
 
 **Troubleshooting**
 
-Many errors can occur. But most often the problem lies within Prime.
+Many errors can occur and are mostly handled by argparse and flow control. Besides those fixes, one common problem lies within Prime.
 When new access points are connected to a switch it usually takes an undefined amount of time before
 their appear in Prime. The discovery process is however faster if you manually sync your WLC.
 
