@@ -18,12 +18,13 @@ HostName,OldBaseRadioAddress,Hostname,NewBaseRadioAddress
 **Requirements:**
 
 All involved accesspoints must be seen in Prime
-python3, netmiko, urllib.request, win32clipboard
+python version3
+python modules: netmiko, urllib.request, win32clipboard, argparse
 
 
 **Troubleshooting**
 
-The script does handle many errors. But most often the problem lies within Prime.
+Many errors can occur. But most often the problem lies within Prime.
 When new access points are connected to a switch it usually takes an undefined amount of time before
 their appear in Prime. The discovery process is however faster if you manually sync your WLC.
 
