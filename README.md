@@ -31,7 +31,7 @@ Many errors can occur and are mostly handled by argparse and flow control. Besid
 When new access points are connected to a switch it usually takes an undefined amount of time before
 their appear in Prime. The discovery process is however faster if you manually sync your WLC.
 
-mac to serial: Translate the mac addresses of mac address table to serial numbers
+mac_serial_table: Translate the mac addresses of mac address table to serial numbers
 ==
 This script is mainly used for updating warehouse statuses. Instead of manually searching for the serial numbers for new access points, you can now just execute this script and specifiy a port range on a switch. The script will then translate the mac addresses to serial numbers by asking the Prime API.
 
